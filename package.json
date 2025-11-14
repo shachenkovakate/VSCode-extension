@@ -1,82 +1,93 @@
 {
-  "name": "google-style-fixer",
-  "displayName": "Google C++ Style Fixer",
-  "description": "Прогон clang-tidy + clang-format по всему рабочему пространству под Google C++ Style Guide с кастомными табами.",
-  "version": "0.0.1",
-  "publisher": "sha-kate",
+	"name": "google-style-fixer",
+	"displayName": "Google C++ Style Fixer",
+	"description": "Прогон clang-tidy + clang-format по всему рабочему пространству под Google C++ Style Guide с кастомными табами.",
+	"version": "0.1.1",
+	"publisher": "sha-kate",
 
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/shachenkovakate/VSCode-extension"
-  },
-  "homepage": "https://github.com/shachenkovakate/VSCode-extension",
-  "engines": {
-    "vscode": "^1.90.0"
-  },
-  "categories": [
-    "Formatters"
-  ],
-  "main": "./out/extension.js",
-  "activationEvents": [
-    "onCommand:googleStyleFixer.fixWorkspace"
-  ],
-  "contributes": {
-    "commands": [
-      {
-        "command": "googleStyleFixer.fixWorkspace",
-        "title": "Fix C++ Google Style in Workspace",
-        "category": "C++"
-      }
-    ],
-    "configuration": {
-      "title": "Google C++ Style Fixer",
-      "properties": {
-        "googleStyleFixer.clangTidyPath": {
-          "type": "string",
-          "default": "clang-tidy",
-          "description": "Путь к clang-tidy (если не в PATH, укажи полный)."
-        },
-        "googleStyleFixer.clangFormatPath": {
-          "type": "string",
-          "default": "clang-format",
-          "description": "Путь к clang-format (если не в PATH, укажи полный)."
-        },
-        "googleStyleFixer.buildDir": {
-          "type": "string",
-          "default": "",
-          "description": "Каталог с compile_commands.json (например, \"build\"). Если пусто, clang-tidy запускается без -p."
-        },
-        "googleStyleFixer.fileGlobs": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [
-            "**/*.{c,cc,cpp,cxx,h,hh,hpp,hxx,ixx}"
-          ],
-          "description": "Глоб-паттерны файлов, по которым будет идти обработка."
-        },
-        "googleStyleFixer.excludeGlobs": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [
-            "**/{build,out,.git,.vscode}/**"
-          ],
-          "description": "Глоб-паттерны для исключения (build каталоги и т.д.)."
-        }
-      }
-    }
-  },
-  "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
-  },
-  "devDependencies": {
-    "@types/node": "^22.0.0",
-    "@types/vscode": "^1.90.0",
-    "typescript": "^5.5.0"
-  }
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/shachenkovakate/VSCode-extension"
+	},
+	"homepage": "https://github.com/shachenkovakate/VSCode-extension",
+	"engines": {
+		"vscode": "^1.90.0"
+	},
+	"categories": [
+		"Formatters"
+	],
+	"main": "./out/extension.js",
+	"activationEvents": [
+		"onCommand:googleStyleFixer.fixWorkspace",
+		"onCommand:googleStyleFixer.fixAndRenameCurrentFile"
+	],
+	"contributes": {
+        "commands": [
+            {
+            "command": "googleStyleFixer.fixWorkspace",
+            "title": "Fix C++ Google Style in Workspace without hard renaming",
+            "category": "C++"
+            },
+            {
+            "command": "googleStyleFixer.fixAndRenameCurrentFile",
+            "title": "Fix C++ Google Style in Current File",
+            "category": "C++"
+            }
+		],
+		"configuration": {
+			"title": "Google C++ Style Fixer",
+			"properties": {
+				"googleStyleFixer.clangTidyPath": {
+					"type": "string",
+					"default": "clang-tidy",
+					"description": "Path to clang-tidy binary."
+				},
+				"googleStyleFixer.clangFormatPath": {
+					"type": "string",
+					"default": "clang-format",
+					"description": "Path to clang-format binary."
+				},
+				"googleStyleFixer.buildDir": {
+					"type": "string",
+					"default": "",
+					"description": "Directory with compile_commands.json (e.g. \"build\"). If empty, clang-tidy runs without -p."
+				},
+				"googleStyleFixer.fileGlobs": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"default": [
+						"**/*.{c,cc,cpp,cxx,h,hh,hpp,hxx,ixx}"
+					],
+					"description": "Glob patterns for C/C++ files to process."
+				},
+				"googleStyleFixer.excludeGlobs": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"default": [
+						"**/{build,out,.git,.vscode}/**"
+					],
+					"description": "Glob patterns to exclude from processing."
+				},
+				"googleStyleFixer.gitDiffBase": {
+					"type": "string",
+					"default": "",
+					"description": "Base revision for git diff (e.g. \"origin/master\"). If empty, uses plain `git diff --name-only` (changes in working tree)."
+				}
+			}
+		}
+	},
+	"scripts": {
+		"vscode:prepublish": "npm run compile",
+		"compile": "tsc -p ./",
+		"watch": "tsc -watch -p ./"
+	},
+	"devDependencies": {
+		"@types/node": "^22.0.0",
+		"@types/vscode": "^1.90.0",
+		"typescript": "^5.5.0"
+	}
 }

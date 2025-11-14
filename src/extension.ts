@@ -6,47 +6,76 @@ type ExecResult = {
 	code: number|null; stdout: string; stderr: string;
 };
 
-function runTool(cmd: string, args: string[], cwd: string): Promise<ExecResult> {
-	return new Promise((resolve) => {
-		const child = cp.spawn(cmd, args, {cwd});
+const outputChannel = vscode.window.createOutputChannel(
+	'Google C++ Style Fixer',
+);
 
+// Для всех запусков с -fix: отключаем только readability-identifier-naming,
+// но наследуем остальной конфиг из .clang-tidy
+const NAMING_CONFIG_OVERRIDE = '{Checks: \'-readability-identifier-naming\', InheritParentConfig: true}';
+
+function runTool(
+	cmd: string,
+	args: string[],
+	cwd: string,
+	): Promise<ExecResult> {
+	return new Promise((resolve) => {
+		outputChannel.appendLine(`$ ${cmd} ${args.join(' ')}  (cwd: ${cwd})`);
+
+		const child = cp.spawn(cmd, args, {cwd});
 		let stdout = '';
 		let stderr = '';
 
 		child.stdout.on('data', (data) => {
 			stdout += data.toString();
 		});
-
 		child.stderr.on('data', (data) => {
 			stderr += data.toString();
 		});
 
 		child.on('close', (code) => {
+			if (stdout.trim().length > 0) {
+				outputChannel.appendLine(`stdout:\n${stdout}`);
+			}
+			if (stderr.trim().length > 0) {
+				outputChannel.appendLine(`stderr:\n${stderr}`);
+			}
+			outputChannel.appendLine(`exit code: ${code}`);
+			outputChannel.appendLine('---');
 			resolve({code, stdout, stderr});
 		});
 	});
 }
 
-async function collectCppFiles(folder: vscode.WorkspaceFolder, fileGlobs: string[], excludeGlobs: string[]): Promise<vscode.Uri[]> {
-	const files: vscode.Uri[] = [];
+/* ======== Сбор файлов для workspace-команды ======== */
 
+async function collectCppFiles(
+	folder: vscode.WorkspaceFolder,
+	fileGlobs: string[],
+	excludeGlobs: string[],
+	): Promise<vscode.Uri[]> {
+	const files: vscode.Uri[] = [];
 	for (const pattern of fileGlobs) {
-		const uris = await vscode.workspace.findFiles(pattern, excludeGlobs.join(','));
-		// Только файлы внутри текущего workspaceFolder
+		const exclude = excludeGlobs.length > 0 ? excludeGlobs.join(',') : undefined;
+		const uris = await vscode.workspace.findFiles(pattern, exclude);
 		for (const uri of uris) {
 			if (uri.fsPath.startsWith(folder.uri.fsPath)) {
 				files.push(uri);
 			}
 		}
 	}
-
 	return files;
 }
 
-async function fixWorkspaceGoogleStyle(): Promise<void> {
-	const folders = vscode.workspace.workspaceFolders;
-	if (!folders || folders.length === 0) {
-		vscode.window.showErrorMessage('Нет открытого workspace: нечего форматировать.');
+async function fixFilesGoogleStyle(
+	files: vscode.Uri[],
+	folders: readonly vscode.WorkspaceFolder[],
+	title: string,
+	): Promise<void> {
+	if (files.length === 0) {
+		vscode.window.showInformationMessage(
+			`${title}: no C/C++ files to process.`,
+		);
 		return;
 	}
 
@@ -54,64 +83,368 @@ async function fixWorkspaceGoogleStyle(): Promise<void> {
 	const clangTidyPath = config.get<string>('clangTidyPath') || 'clang-tidy';
 	const clangFormatPath = config.get<string>('clangFormatPath') || 'clang-format';
 	const buildDir = config.get<string>('buildDir') || '';
+
+	outputChannel.appendLine(
+		`Starting ${title} for ${files.length} file(s).`,
+	);
+	outputChannel.show(true);
+
+	await vscode.window.withProgress(
+		{
+			location: vscode.ProgressLocation.Notification,
+			title,
+			cancellable: false,
+		},
+		async (progress) => {
+			const total = files.length;
+			let processed = 0;
+
+			for (const file of files) {
+				processed++;
+				const relative = vscode.workspace.asRelativePath(file);
+				progress.report({
+					message: relative,
+					increment: (processed / total) * 100,
+				});
+
+				const folder = folders.find((f) => file.fsPath.startsWith(f.uri.fsPath)) || folders[0];
+				const cwd = folder.uri.fsPath;
+
+				// clang-tidy с fix-its, но с отключённым naming-чеком
+				const tidyArgs: string[] = [
+					'-fix',
+					'-fix-errors',
+				];
+				if (buildDir.trim().length > 0) {
+					tidyArgs.push(`-p=${path.join(cwd, buildDir)}`);
+				}
+				tidyArgs.push(
+					`-config=${NAMING_CONFIG_OVERRIDE}`,
+					'-quiet',
+					file.fsPath,
+					'--',
+					'-std=c++20',
+				);
+
+				const tidyResult = await runTool(
+					clangTidyPath,
+					tidyArgs,
+					cwd,
+				);
+				if (tidyResult.code !== 0) {
+					const msg = `clang-tidy exited with code ${tidyResult.code} for ${relative}`;
+					outputChannel.appendLine(msg);
+					vscode.window.showWarningMessage(msg);
+				}
+
+				// clang-format in-place
+				const formatArgs = ['-i', file.fsPath];
+				const formatResult = await runTool(
+					clangFormatPath,
+					formatArgs,
+					cwd,
+				);
+				if (formatResult.code !== 0) {
+					const msg = `clang-format exited with code ${formatResult.code} for ${relative}`;
+					outputChannel.appendLine(msg);
+					vscode.window.showWarningMessage(msg);
+				}
+			}
+
+			vscode.window.showInformationMessage(`${title}: done.`);
+		},
+	);
+}
+
+async function fixWorkspaceGoogleStyle(): Promise<void> {
+	const folders = vscode.workspace.workspaceFolders;
+	if (!folders || folders.length === 0) {
+		vscode.window.showErrorMessage('No workspace folder is open.');
+		return;
+	}
+
+	const config = vscode.workspace.getConfiguration('googleStyleFixer');
 	const fileGlobs = config.get<string[]>('fileGlobs') || ['**/*.{c,cc,cpp,cxx,h,hh,hpp,hxx,ixx}'];
 	const excludeGlobs = config.get<string[]>('excludeGlobs') || ['**/{build,out,.git,.vscode}/**'];
 
-	await vscode.window.withProgress({location: vscode.ProgressLocation.Notification, title: 'Google C++ Style Fixer', cancellable: false}, async (progress) => {
-		let allFiles: vscode.Uri[] = [];
-		for (const folder of folders) {
-			const files = await collectCppFiles(folder, fileGlobs, excludeGlobs);
-			allFiles = allFiles.concat(files);
-		}
+	let allFiles: vscode.Uri[] = [];
+	for (const folder of folders) {
+		const files = await collectCppFiles(
+			folder,
+			fileGlobs,
+			excludeGlobs,
+		);
+		allFiles = allFiles.concat(files);
+	}
 
-		if (allFiles.length === 0) {
-			vscode.window.showInformationMessage('C/C++ файлов не найдено по заданным паттернам.');
-			return;
-		}
-
-		const total = allFiles.length;
-		let index = 0;
-
-		for (const file of allFiles) {
-			index++;
-			const relative = vscode.workspace.asRelativePath(file);
-			progress.report({message: `clang-tidy + clang-format: ${relative}`, increment: (index / total) * 100});
-
-			const folder = folders.find(f => file.fsPath.startsWith(f.uri.fsPath)) || folders[0];
-			const cwd = folder.uri.fsPath;
-
-			const tidyArgs: string[] = ['-fix', '-quiet', file.fsPath];
-			if (buildDir.trim().length > 0) {
-				tidyArgs.splice(1, 0, `-p=${path.join(cwd, buildDir)}`);
-			}
-
-			const tidyResult = await runTool(clangTidyPath, tidyArgs, cwd);
-			if (tidyResult.code !== 0) {
-				const msg = `clang-tidy завершился с кодом ${tidyResult.code} для ${relative}`;
-				console.error(msg, tidyResult.stderr);
-				vscode.window.showWarningMessage(msg);
-			}
-
-			const formatArgs = ['-i', file.fsPath];
-			const formatResult = await runTool(clangFormatPath, formatArgs, cwd);
-			if (formatResult.code !== 0) {
-				const msg = `clang-format завершился с кодом ${formatResult.code} для ${relative}`;
-				console.error(msg, formatResult.stderr);
-				vscode.window.showWarningMessage(msg);
-			}
-		}
-
-		vscode.window.showInformationMessage('Google C++ Style Fixer: finished fixing.');
-	});
+	await fixFilesGoogleStyle(
+		allFiles,
+		folders,
+		'Google C++ Style Fixer (Workspace)',
+	);
 }
 
-export function activate(context: vscode.ExtensionContext) {
-	const disposable = vscode.commands.registerCommand('googleStyleFixer.fixWorkspace', () => {
-		fixWorkspaceGoogleStyle().catch((err) => {
-			console.error('Ошибка при запуске Google Style Fixer', err);
-			vscode.window.showErrorMessage(`Google Style Fixer: произошла ошибка, смотри консоль разработчика.`);
-		});
-	});
+/* ======== Нейминг для текущего файла (через Rename Symbol) ======== */
 
-	context.subscriptions.push(disposable);
+
+type NamingDiag = {
+	file: string; line: number; col: number; symbol: string; kind: string;
+};
+
+function toLowerSnake(s: string): string {
+	let out = s.replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/([A-Z])([A-Z][a-z])/g, '$1_$2');
+	out = out.replace(/[\s\-]+/g, '_').replace(/__+/g, '_').toLowerCase();
+	return out;
+}
+
+function toPascalCase(s: string): string {
+	const parts = s.split(/[_\s\-]+/).filter(Boolean);
+	return parts.map((p) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join('');
+}
+
+function toLowerCamelFromSnake(s: string): string {
+	const pascal = toPascalCase(s);
+	return pascal.length > 0 ? pascal.charAt(0).toLowerCase() + pascal.slice(1) : pascal;
+}
+
+// <-- вот ЭТО главное: функции в PascalCase, константы в kPascalCase,
+// переменные / параметры / члены — в lower_snake_case
+function inferTargetName(kind: string, current: string): string|null {
+	const k = kind.toLowerCase();
+	const baseSnake = toLowerSnake(current);
+
+	// constants: kMaxSize
+	if (k.includes('enum constant') || k.includes('global constant') || k.includes('static constant') || k.includes('constant')) {
+		const pascal = toPascalCase(baseSnake);									  // MaxSize
+		const res = pascal.length > 0 ? 'k' + pascal.charAt(0) + pascal.slice(1)  // kMaxSize
+										:
+										'k';
+		return res;
+	}
+
+	// functions / methods: PascalCase (Popcount, DoSomethingNice)
+	if (k.includes('function') || k.includes('method')) {
+		return toPascalCase(baseSnake);	 // popcount -> Popcount
+	}
+
+	// variables / params / members / namespaces: lower_snake_case
+	if (k.includes('variable') || k.includes('parameter') || k.includes('private member') || k.includes('protected member') || k.includes('global variable') || k.includes('namespace')) {
+		return baseSnake;  // value_count
+	}
+
+	return null;
+}
+
+function parseNamingDiagnostics(tidyOutput: string): NamingDiag[] {
+	const out: NamingDiag[] = [];
+	const re = /^(.+?):(\d+):(\d+):\s+warning: (.+?) \[readability-identifier-naming\]$/gm;
+
+	for (const m of tidyOutput.matchAll(re)) {
+		const file = m[1];
+		const line = parseInt(m[2], 10);
+		const col = parseInt(m[3], 10);
+		const msg = m[4];
+
+		const m2 = /(invalid case style for|wrong case for|not following naming convention for)\s+([a-zA-Z ]+)\s+'([^']+)'/i.exec(
+			msg,
+		);
+		if (m2) {
+			out.push({
+				file,
+				line,
+				col,
+				kind: m2[2].trim(),
+				symbol: m2[3],
+			});
+		} else {
+			out.push({
+				file,
+				line,
+				col,
+				kind: 'identifier',
+				symbol: '',
+			});
+		}
+	}
+	return out;
+}
+
+async function runTidyNoFixOnFile(
+	file: string,
+	cwd: string,
+	clangTidyPath: string,
+	buildDir: string,
+	): Promise<string> {
+	const args: string[] = [];
+	if (buildDir.trim().length > 0) {
+		args.push(`-p=${path.join(cwd, buildDir)}`);
+	}
+	// тут НЕТ -config, чтобы naming-чек сработал как в твоём .clang-tidy
+	args.push(file, '--format-style=file', '--header-filter=.*', '--', '-std=c++20');
+	const res = await runTool(clangTidyPath, args, cwd);
+	return (res.stdout || '') + '\n' + (res.stderr || '');
+}
+
+/* ======== Текущий файл: нейминг + стиль ======== */
+
+async function fixCurrentFileGoogleStyle(): Promise<void> {
+	const editor = vscode.window.activeTextEditor;
+	if (!editor) {
+		vscode.window.showErrorMessage('Open a C/C++ file.');
+		return;
+	}
+
+	const doc = editor.document;
+	const file = doc.fileName;
+
+	const folder = vscode.workspace.getWorkspaceFolder(doc.uri) || vscode.workspace.workspaceFolders?.[0];
+	if (!folder) {
+		vscode.window.showErrorMessage('No workspace folder is open.');
+		return;
+	}
+	const cwd = folder.uri.fsPath;
+
+	const config = vscode.workspace.getConfiguration('googleStyleFixer');
+	const clangTidyPath = config.get<string>('clangTidyPath') || 'clang-tidy';
+	const clangFormatPath = config.get<string>('clangFormatPath') || 'clang-format';
+	const buildDir = config.get<string>('buildDir') || '';
+
+	await doc.save();
+	outputChannel.show(true);
+
+	// 1) СНАЧАЛА: собрать naming-варнинги (без -fix, без -config override)
+	const combined = await runTidyNoFixOnFile(file, cwd, clangTidyPath, buildDir);
+	const diags = parseNamingDiagnostics(combined).filter(
+		(d) => path.normalize(d.file) === path.normalize(file),
+	);
+
+	if (diags.length > 0) {
+		// снизу вверх, один раз на символ
+		diags.sort((a, b) => b.line - a.line || b.col - a.col);
+		const seen = new Set<string>();
+		let applied = 0;
+
+		for (const d of diags) {
+			if (!d.symbol)
+				continue;
+			const key = `${d.kind}::${d.symbol}`;
+			if (seen.has(key))
+				continue;
+			seen.add(key);
+
+			const liveDoc = await vscode.workspace.openTextDocument(doc.uri);
+			const liveEditor = await vscode.window.showTextDocument(liveDoc, {
+				preview: false,
+			});
+
+			const pos = new vscode.Position(
+				Math.max(0, d.line - 1),
+				Math.max(0, d.col - 1),
+			);
+			const range = liveEditor.document.getWordRangeAtPosition(pos) || new vscode.Range(pos, pos.translate(0, 1));
+			const currentText = liveEditor.document.getText(range) || d.symbol;
+			const target = inferTargetName(d.kind, currentText);
+			if (!target || target === currentText) {
+				continue;
+			}
+
+			try {
+				const edit = await vscode.commands.executeCommand(
+								 'vscode.executeDocumentRenameProvider',
+								 liveDoc.uri,
+								 range.start,
+								 target,
+								 ) as vscode.WorkspaceEdit |
+					undefined;
+
+				if (edit) {
+					const ok = await vscode.workspace.applyEdit(edit);
+					if (ok) {
+						applied++;
+						await liveDoc.save();
+					}
+				}
+			} catch {
+				// если язык-сервер не смог — пропускаем
+			}
+		}
+
+		if (applied > 0) {
+			vscode.window.showInformationMessage(
+				`Applied ${applied} rename(s) via language-server rename.`,
+			);
+		} else {
+			vscode.window.showInformationMessage('No safe renames applied.');
+		}
+	} else {
+		vscode.window.showInformationMessage('No naming violations detected.');
+	}
+
+	// 2) ТЕПЕРЬ: clang-tidy с -fix, но с отключённым naming-чеком
+	{
+		const args: string[] = [
+			'-fix',
+			'-fix-errors',
+		];
+		if (buildDir.trim().length > 0) {
+			args.push(`-p=${path.join(cwd, buildDir)}`);
+		}
+		args.push(
+			`-config=${NAMING_CONFIG_OVERRIDE}`,
+			'-quiet',
+			file,
+			'--',
+			'-std=c++20',
+		);
+		await runTool(clangTidyPath, args, cwd);
+	}
+
+	// 3) И финальный clang-format
+	{
+		await runTool(clangFormatPath, ['-i', file], cwd);
+		const finalDoc = await vscode.workspace.openTextDocument(doc.uri);
+		await finalDoc.save();
+	}
+
+	vscode.window.showInformationMessage(
+		'Google C++ Style Fixer: current file formatted with naming updates.',
+	);
+}
+
+/* ================== activation ================== */
+
+export function activate(context: vscode.ExtensionContext) {
+	const fixWorkspaceCmd = vscode.commands.registerCommand(
+		'googleStyleFixer.fixWorkspace',
+		() => {
+			fixWorkspaceGoogleStyle().catch((err) => {
+				outputChannel.appendLine(
+					`Error in fixWorkspace: ${String(err)}`,
+				);
+				vscode.window.showErrorMessage(
+					'Google C++ Style Fixer: error, see output channel.',
+				);
+			});
+		},
+	);
+
+	const fixCurrentCmd = vscode.commands.registerCommand(
+		'googleStyleFixer.fixAndRenameCurrentFile',
+		() => {
+			fixCurrentFileGoogleStyle().catch((err) => {
+				outputChannel.appendLine(
+					`Error in fixCurrentFile: ${String(err)}`,
+				);
+				vscode.window.showErrorMessage(
+					'Google C++ Style Fixer (Current File): error, see output channel.',
+				);
+			});
+		},
+	);
+
+	context.subscriptions.push(fixWorkspaceCmd, fixCurrentCmd);
+}
+
+export function deactivate() {
+	// nothing special
 }
