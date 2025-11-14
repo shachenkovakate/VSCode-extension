@@ -1,0 +1,60 @@
+{
+  "name": "google-cpp-style-guard",
+  "displayName": "Google C++ Style Guard",
+  "publisher": "sha-kate",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.90.0" },
+    "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shachenkovakate/VSCode-extension"
+  },
+  "categories": ["Formatters", "Linters"],
+  "activationEvents": [
+    "onLanguage:cpp", "onLanguage:c",
+    "onCommand:gcs.writeClangFormat",
+    "onCommand:gcs.writeClangTidy",
+    "onCommand:gcs.formatCurrent",
+    "onCommand:gcs.enforceStyleCurrent"
+  ],
+  "contributes": {
+    "commands": [
+      { "command": "gcs.writeClangFormat", "title": "GCS: Write .clang-format (Google)" },
+      { "command": "gcs.writeClangTidy", "title": "GCS: Write .clang-tidy (Google naming + braces)" },
+      { "command": "gcs.formatCurrent", "title": "GCS: Format Current File (clang-format)" },
+      { "command": "gcs.enforceStyleCurrent", "title": "GCS: Enforce Google Style (naming + braces, current file)" }
+    ],
+    "configuration": {
+      "title": "Google C++ Style Guard",
+      "properties": {
+        "gcs.format.path": {
+          "type": "string",
+          "default": "clang-format",
+          "description": "Path to clang-format binary"
+        },
+        "gcs.tidy.path": {
+          "type": "string",
+          "default": "clang-tidy",
+          "description": "Path to clang-tidy binary"
+        },
+        "gcs.compileCommandsPath": {
+          "type": "string",
+          "default": "build/compile_commands.json",
+          "description": "Path to compile_commands.json (relative to workspace or absolute). Used for naming/braces fixes."
+        }
+      }
+    }
+  },
+  "main": "./out/extension.js",
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -w -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.5",
+    "typescript": "^5.6.3",
+    "@types/vscode": "^1.90.0"
+  },
+  "dependencies": { "yaml": "^2.5.1" }
+}
