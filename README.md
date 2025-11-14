@@ -1,28 +1,50 @@
-bash -lc 'cat > README.md << "MD"
-# Google C++ Style Guard
+# Google C++ Style Fixer
 
-Enforce **Google C++ Style** in VS Code using `clang-format` (tabs width 4) and `clang-tidy` style-only checks (braces + identifier naming).
+VS Code extension that runs `clang-tidy` + `clang-format` over your C/C++ project and brings it close to [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html) — with a few opinionated tweaks:
+
+- tabs are allowed (and visually 4 spaces wide);
+- all one-line `if` / `for` / `while` get proper braces and line breaks;
+- naming is normalized via `clang-tidy`’s `readability-identifier-naming`;
+- no forced C++-style casts everywhere;
+- no `auto main() -> int` nonsense.
+
+Everything happens **only when you explicitly run the command**. No background “helpfulness”, no surprise edits while you type.
+
+---
 
 ## Features
-- Writes `.clang-format` with `BasedOnStyle: Google`, `IndentWidth: 4`, `TabWidth: 4`, `UseTab: Always`.
-- Writes `.clang-tidy` limited to:
-  - `readability-braces-around-statements`
-  - `readability-identifier-naming` (Google-like schema)
-- Formats current file with `clang-format`.
-- Optionally applies tidy *style* fixes (no modernize/perf/bugprone).
 
-## Commands
-- **GCS: Write .clang-format (Google)** — `gcs.writeClangFormat`
-- **GCS: Write .clang-tidy (Google naming + braces)** — `gcs.writeClangTidy`
-- **GCS: Format Current File** — `gcs.formatCurrent`
-- **GCS: Enforce Google Style (…current file)** — `gcs.enforceStyleCurrent`
+- Run a single command:  
+  **“Fix C++ Google Style in Workspace”**  
+  and the extension will:
+  - find all C/C++ files in the workspace matching configured glob patterns;
+  - run `clang-tidy -fix` on each file;
+  - then run `clang-format -i` on each file.
 
-## Settings
-- `gcs.format.path` — path to `clang-format` (default: `clang-format`)
-- `gcs.tidy.path` — path to `clang-tidy` (default: `clang-tidy`)
-- `gcs.compileCommandsPath` — compile DB (default: `build/compile_commands.json`)
+- Uses your existing style configuration:
+  - global `~/.clang-format` or project `.clang-format`;
+  - global `~/.clang-tidy` or project `.clang-tidy`.
+
+- Honors your indentation preferences:
+  - tabs enabled;
+  - tab width = 4;
+  - VS Code C/C++ settings can stay with tabs, not spaces.
+
+- One-shot changes:
+  - the extension does nothing on save, nothing on type;
+  - it only modifies files when you explicitly call the command.
+
+---
 
 ## Requirements
-Install LLVM tools:
+
+You need these tools installed and available in `PATH`:
+
+- `clang-format`
+- `clang-tidy`
+
+Check with:
+
 ```bash
-sudo apt-get install clang-format clang-tidy
+clang-format --version
+clang-tidy --version
