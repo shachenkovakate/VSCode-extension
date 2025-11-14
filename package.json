@@ -1,60 +1,82 @@
 {
-  "name": "google-cpp-style-guard",
-  "displayName": "Google C++ Style Guard",
-  "publisher": "sha-kate",
+  "name": "google-style-fixer",
+  "displayName": "Google C++ Style Fixer",
+  "description": "Прогон clang-tidy + clang-format по всему рабочему пространству под Google C++ Style Guide с кастомными табами.",
   "version": "0.0.1",
-  "engines": { "vscode": "^1.90.0" },
-    "license": "MIT",
+  "publisher": "sha-kate",
+
   "repository": {
     "type": "git",
     "url": "https://github.com/shachenkovakate/VSCode-extension"
   },
-  "categories": ["Formatters", "Linters"],
+  "homepage": "https://github.com/shachenkovakate/VSCode-extension",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Formatters"
+  ],
+  "main": "./out/extension.js",
   "activationEvents": [
-    "onLanguage:cpp", "onLanguage:c",
-    "onCommand:gcs.writeClangFormat",
-    "onCommand:gcs.writeClangTidy",
-    "onCommand:gcs.formatCurrent",
-    "onCommand:gcs.enforceStyleCurrent"
+    "onCommand:googleStyleFixer.fixWorkspace"
   ],
   "contributes": {
     "commands": [
-      { "command": "gcs.writeClangFormat", "title": "GCS: Write .clang-format (Google)" },
-      { "command": "gcs.writeClangTidy", "title": "GCS: Write .clang-tidy (Google naming + braces)" },
-      { "command": "gcs.formatCurrent", "title": "GCS: Format Current File (clang-format)" },
-      { "command": "gcs.enforceStyleCurrent", "title": "GCS: Enforce Google Style (naming + braces, current file)" }
+      {
+        "command": "googleStyleFixer.fixWorkspace",
+        "title": "Fix C++ Google Style in Workspace",
+        "category": "C++"
+      }
     ],
     "configuration": {
-      "title": "Google C++ Style Guard",
+      "title": "Google C++ Style Fixer",
       "properties": {
-        "gcs.format.path": {
-          "type": "string",
-          "default": "clang-format",
-          "description": "Path to clang-format binary"
-        },
-        "gcs.tidy.path": {
+        "googleStyleFixer.clangTidyPath": {
           "type": "string",
           "default": "clang-tidy",
-          "description": "Path to clang-tidy binary"
+          "description": "Путь к clang-tidy (если не в PATH, укажи полный)."
         },
-        "gcs.compileCommandsPath": {
+        "googleStyleFixer.clangFormatPath": {
           "type": "string",
-          "default": "build/compile_commands.json",
-          "description": "Path to compile_commands.json (relative to workspace or absolute). Used for naming/braces fixes."
+          "default": "clang-format",
+          "description": "Путь к clang-format (если не в PATH, укажи полный)."
+        },
+        "googleStyleFixer.buildDir": {
+          "type": "string",
+          "default": "",
+          "description": "Каталог с compile_commands.json (например, \"build\"). Если пусто, clang-tidy запускается без -p."
+        },
+        "googleStyleFixer.fileGlobs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/*.{c,cc,cpp,cxx,h,hh,hpp,hxx,ixx}"
+          ],
+          "description": "Глоб-паттерны файлов, по которым будет идти обработка."
+        },
+        "googleStyleFixer.excludeGlobs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/{build,out,.git,.vscode}/**"
+          ],
+          "description": "Глоб-паттерны для исключения (build каталоги и т.д.)."
         }
       }
     }
   },
-  "main": "./out/extension.js",
   "scripts": {
+    "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -w -p ./",
-    "vscode:prepublish": "npm run compile"
+    "watch": "tsc -watch -p ./"
   },
   "devDependencies": {
-    "@types/node": "^22.7.5",
-    "typescript": "^5.6.3",
-    "@types/vscode": "^1.90.0"
-  },
-  "dependencies": { "yaml": "^2.5.1" }
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.5.0"
+  }
 }
