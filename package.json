@@ -2,7 +2,7 @@
 	"name": "google-style-fixer",
 	"displayName": "Google C++ Style Fixer",
 	"description": "Прогон clang-tidy + clang-format по всему рабочему пространству под Google C++ Style Guide с кастомными табами.",
-	"version": "0.1.1",
+	"version": "0.1.3",
 	"publisher": "sha-kate",
 
 	"repository": {

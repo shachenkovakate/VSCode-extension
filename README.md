@@ -1,13 +1,13 @@
-
 # Google C++ Style Fixer (VS Code Extension)
+
+**Creator**: Shachenkova Kate, ITMO Universty (M3101)
 
 This Visual Studio Code extension helps you keep your C and C++ code close to the
 [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html) while still
 respecting your own clang-format / clang-tidy configuration.
 
 It is designed to be very explicit and predictable:
-you press a command – it changes files **once**, and then stops.  
-No background magic, no auto-fixing on every keystroke.
+you press a command – it changes files **once**, and then stops.
 
 ---
 
@@ -19,6 +19,9 @@ The extension provides **two commands**:
    Command ID: `googleStyleFixer.fixWorkspace`
 
    - Runs `clang-tidy` with `-fix` on **all C/C++ files** in the workspace that match configured glob patterns.
+   - Automatically **adds missing standard library `#include <...>` directives** for common `std::...` usages
+     (`std::cout`, `std::cerr`, `std::string`, `std::vector`, etc.) and inserts them into the block of
+     system includes *before* local includes.
    - Runs `clang-format` on those files.
    - **Does _not_ change identifier naming.**  
      All readability-identifier-naming renames are disabled for this command.
@@ -41,7 +44,7 @@ The extension provides **two commands**:
 
 Summary:
 
-- **Workspace command** → style fixes only, **no naming changes**.  
+- **Workspace command** → style fixes + automatic standard includes, **no naming changes**.  
 - **Current file command** → renames identifiers in a style-safe way and then
   applies style fixes.
 
@@ -230,6 +233,9 @@ The extension will:
 - run `clang-tidy -fix -fix-errors` on each file with a temporary config that
   disables `readability-identifier-naming` but inherits the rest from your
   `.clang-tidy`,
+- **scan each file for common `std::...` usages (streams, containers, strings, etc.) and add
+  missing standard `#include <...>` directives** into the block of system includes,
+  keeping all `#include <...>` above any `#include "..."`,
 - run `clang-format -i` on each file.
 
 Changes are applied **once**. Nothing continues to auto-format in the background.
@@ -272,6 +278,10 @@ The extension will:
 If no safe renames can be applied (for example, the language server cannot
 rename something), the extension reports that and still runs tidy+format.
 
+Note: the **current-file** command intentionally does **not** add or reorder
+`#include` directives by itself — this is handled in the workspace command,
+after which `clang-format` can keep include blocks consistent.
+
 ---
 
 ## 5. Configuration in VS Code
@@ -293,7 +303,7 @@ You can edit them via:
 - Example values:
   - Linux: `"clang-tidy"`
   - macOS: `"/opt/homebrew/opt/llvm/bin/clang-tidy"`
-  - Windows: `"C:\Program Files\LLVM\bin\clang-tidy.exe"`
+  - Windows: `"C:\\Program Files\\LLVM\\bin\\clang-tidy.exe"`
 
 #### `googleStyleFixer.clangFormatPath` (string)
 
@@ -302,7 +312,7 @@ You can edit them via:
 - Example values:
   - Linux: `"clang-format"`
   - macOS: `"/opt/homebrew/opt/llvm/bin/clang-format"`
-  - Windows: `"C:\Program Files\LLVM\bin\clang-format.exe"`
+  - Windows: `"C\\Program Files\\LLVM\\bin\\clang-format.exe"`
 
 #### `googleStyleFixer.buildDir` (string)
 
@@ -387,7 +397,7 @@ Place this in:
 - your project root as `.clang-format`, or
 - your home directory (for a global default), e.g.
   - Linux/macOS: `~/.clang-format`
-  - Windows: `C:\Users\YourName\.clang-format`
+  - Windows: `C:\\Users\\YourName\\.clang-format`
 
 The extension simply calls `clang-format -i`. All formatting decisions are made
 by your `clang-format` version + this file.
@@ -467,16 +477,18 @@ Place this file as `.clang-tidy` in your project root or home directory.
 
 - In **workspace mode**, the extension runs `clang-tidy` with an extra
   temporary `-config` that **disables only** `readability-identifier-naming`
-  but inherits everything else. This prevents accidental mass renames while
-  keeping all other checks active.
+  but inherits everything else. It then scans each file and automatically adds
+  missing standard includes, and only after that calls `clang-format`.
 - In **current file mode**, the extension:
   - first runs `clang-tidy` **without** overrides and **without** `-fix` to
     retrieve naming diagnostics;
   - uses its own renaming logic via the language server;
   - then runs `clang-tidy -fix` again **with** naming disabled, to avoid
-    double-changes to identifiers.
+    double-changes to identifiers;
+  - finally runs `clang-format`.
 
-This way you keep precise control over when and how names are changed.
+This way you keep precise control over when and how names are changed, while
+still getting auto-added standard includes in workspace mode.
 
 ---
 

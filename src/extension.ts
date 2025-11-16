@@ -67,6 +67,184 @@ async function collectCppFiles(
 	return files;
 }
 
+/* ======== Добивка стандартных инклюдов для всего workspace ======== */
+
+const REQUIRED_HEADERS: {header: string; patterns: RegExp[]}[] = [
+	{
+		header: 'iostream',
+		patterns: [/\bstd::(cout|cerr|clog|cin)\b/],
+	},
+	{
+		header: 'string',
+		patterns: [/\bstd::string\b/],
+	},
+	{
+		header: 'vector',
+		patterns: [/\bstd::vector\b/],
+	},
+	{
+		header: 'array',
+		patterns: [/\bstd::array\b/],
+	},
+	{
+		header: 'map',
+		patterns: [/\bstd::map\b/],
+	},
+	{
+		header: 'unordered_map',
+		patterns: [/\bstd::unordered_map\b/],
+	},
+	{
+		header: 'set',
+		patterns: [/\bstd::set\b/],
+	},
+	{
+		header: 'unordered_set',
+		patterns: [/\bstd::unordered_set\b/],
+	},
+	{
+		header: 'optional',
+		patterns: [/\bstd::optional\b/],
+	},
+	{
+		header: 'memory',
+		patterns: [/\bstd::unique_ptr\b/, /\bstd::shared_ptr\b/],
+	},
+	{
+		header: 'thread',
+		patterns: [/\bstd::thread\b/],
+	},
+	{
+		header: 'mutex',
+		patterns: [/\bstd::mutex\b/],
+	},
+	{
+		header: 'ctring',
+		patterns: [/\bstd::atoi\b/],
+	},
+	{
+		header: 'ctring',
+		patterns: [/\bstd::atol\b/],
+	},
+];
+
+// Вставляем недостающие #include <...> в блок системных инклюдов
+async function ensureStandardIncludes(file: vscode.Uri): Promise<void> {
+	const doc = await vscode.workspace.openTextDocument(file);
+	const originalText = doc.getText();
+	let text = originalText;
+
+	if (text.length === 0) {
+		return;
+	}
+
+	// Собираем уже существующие инклюды
+	const existingStd = new Set<string>();
+	const existingLocal = new Set<string>();
+
+	const includeRe = /^\s*#\s*include\s*([<"])\s*([^>"]+)\s*[>"].*$/gm;
+	let m: RegExpExecArray|null;
+	while ((m = includeRe.exec(text)) !== null) {
+		const kind = m[1];
+		const name = m[2].trim();
+		if (kind === '<') {
+			existingStd.add(name);
+		} else {
+			existingLocal.add(name);
+		}
+	}
+
+	// Определяем, какие заголовки нужны по использованию std::...
+	const needed: string[] = [];
+	for (const entry of REQUIRED_HEADERS) {
+		const headerName = entry.header;
+		if (existingStd.has(headerName)) {
+			continue;
+		}
+		// Если хотя бы один паттерн совпал — заголовок нужен
+		let found = false;
+		for (const r of entry.patterns) {
+			if (r.test(text)) {
+				found = true;
+				break;
+			}
+		}
+		if (found) {
+			needed.push(headerName);
+		}
+	}
+
+	if (needed.length === 0) {
+		return;
+	}
+
+	needed.sort();
+
+	const lines = text.split(/\r?\n/);
+
+	let firstInclude = -1;
+	let lastStdInclude = -1;
+	let firstLocalInclude = -1;
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+		const m2 = /^\s*#\s*include\s*([<"])\s*([^>"]+)\s*[>"].*$/.exec(line);
+		if (!m2) {
+			continue;
+		}
+		const kind = m2[1];
+
+		if (firstInclude === -1) {
+			firstInclude = i;
+		}
+		if (kind === '<') {
+			lastStdInclude = i;
+		} else if (kind === '"') {
+			if (firstLocalInclude === -1) {
+				firstLocalInclude = i;
+			}
+		}
+	}
+
+	let insertIndex = 0;
+	if (lastStdInclude >= 0) {
+		// есть хотя бы один системный include: вставляем СРАЗУ после него
+		insertIndex = lastStdInclude + 1;
+	} else if (firstLocalInclude >= 0) {
+		// нет системных, но есть локальные: вставляем ПЕРЕД первым локальным
+		insertIndex = firstLocalInclude;
+	} else if (firstInclude >= 0) {
+		// какой-то include есть, но непонятный случай: вставляем перед ним
+		insertIndex = firstInclude;
+	} else {
+		// вообще нет include — вставляем в начало файла
+		insertIndex = 0;
+	}
+
+	const newLines = needed.map((h) => `#include <${h}>`);
+
+	lines.splice(insertIndex, 0, ...newLines);
+
+	const eol = doc.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
+	const newText = lines.join(eol);
+
+	if (newText === originalText) {
+		return;
+	}
+
+	const fullRange = new vscode.Range(
+		doc.positionAt(0),
+		doc.positionAt(originalText.length),
+	);
+
+	const edit = new vscode.WorkspaceEdit();
+	edit.replace(file, fullRange, newText);
+	await vscode.workspace.applyEdit(edit);
+	await doc.save();
+}
+
+/* ======== Workspace-команда: clang-tidy + includes + clang-format ======== */
+
 async function fixFilesGoogleStyle(
 	files: vscode.Uri[],
 	folders: readonly vscode.WorkspaceFolder[],
@@ -137,6 +315,9 @@ async function fixFilesGoogleStyle(
 					vscode.window.showWarningMessage(msg);
 				}
 
+				// Добавляем недостающие стандартные #include <...>
+				await ensureStandardIncludes(file);
+
 				// clang-format in-place
 				const formatArgs = ['-i', file.fsPath];
 				const formatResult = await runTool(
@@ -186,7 +367,6 @@ async function fixWorkspaceGoogleStyle(): Promise<void> {
 
 /* ======== Нейминг для текущего файла (через Rename Symbol) ======== */
 
-
 type NamingDiag = {
 	file: string; line: number; col: number; symbol: string; kind: string;
 };
@@ -207,13 +387,17 @@ function toLowerCamelFromSnake(s: string): string {
 	return pascal.length > 0 ? pascal.charAt(0).toLowerCase() + pascal.slice(1) : pascal;
 }
 
-// <-- вот ЭТО главное: функции в PascalCase, константы в kPascalCase,
-// переменные / параметры / члены — в lower_snake_case
+// функции в PascalCase, константы в kPascalCase, переменные — в lower_snake_case
 function inferTargetName(kind: string, current: string): string|null {
 	const k = kind.toLowerCase();
 	const baseSnake = toLowerSnake(current);
 
-	// constants: kMaxSize
+	// 1) Структуры / классы / типы → PascalCase (Int2025T, BigThing, MyType)
+	if (k.includes('struct') || k.includes('class') || k.includes('type')) {
+		return toPascalCase(baseSnake);
+	}
+
+	// 2) Константы (включая enum) → kPascalCase (kMaxSize, kDefaultTimeout)
 	if (k.includes('enum constant') || k.includes('global constant') || k.includes('static constant') || k.includes('constant')) {
 		const pascal = toPascalCase(baseSnake);									  // MaxSize
 		const res = pascal.length > 0 ? 'k' + pascal.charAt(0) + pascal.slice(1)  // kMaxSize
@@ -222,12 +406,12 @@ function inferTargetName(kind: string, current: string): string|null {
 		return res;
 	}
 
-	// functions / methods: PascalCase (Popcount, DoSomethingNice)
+	// 3) Функции / методы → PascalCase (Popcount, DoSomethingNice)
 	if (k.includes('function') || k.includes('method')) {
-		return toPascalCase(baseSnake);	 // popcount -> Popcount
+		return toPascalCase(baseSnake);
 	}
 
-	// variables / params / members / namespaces: lower_snake_case
+	// 4) Переменные / параметры / поля / namespaces → lower_snake_case
 	if (k.includes('variable') || k.includes('parameter') || k.includes('private member') || k.includes('protected member') || k.includes('global variable') || k.includes('namespace')) {
 		return baseSnake;  // value_count
 	}
@@ -312,7 +496,7 @@ async function fixCurrentFileGoogleStyle(): Promise<void> {
 	await doc.save();
 	outputChannel.show(true);
 
-	// 1) СНАЧАЛА: собрать naming-варнинги (без -fix, без -config override)
+	// 1) Собираем naming-диагностику
 	const combined = await runTidyNoFixOnFile(file, cwd, clangTidyPath, buildDir);
 	const diags = parseNamingDiagnostics(combined).filter(
 		(d) => path.normalize(d.file) === path.normalize(file),
@@ -325,11 +509,13 @@ async function fixCurrentFileGoogleStyle(): Promise<void> {
 		let applied = 0;
 
 		for (const d of diags) {
-			if (!d.symbol)
+			if (!d.symbol) {
 				continue;
+			}
 			const key = `${d.kind}::${d.symbol}`;
-			if (seen.has(key))
+			if (seen.has(key)) {
 				continue;
+			}
 			seen.add(key);
 
 			const liveDoc = await vscode.workspace.openTextDocument(doc.uri);
@@ -349,12 +535,12 @@ async function fixCurrentFileGoogleStyle(): Promise<void> {
 			}
 
 			try {
-				const edit = await vscode.commands.executeCommand(
+				const edit = (await vscode.commands.executeCommand(
 								 'vscode.executeDocumentRenameProvider',
 								 liveDoc.uri,
 								 range.start,
 								 target,
-								 ) as vscode.WorkspaceEdit |
+								 )) as vscode.WorkspaceEdit |
 					undefined;
 
 				if (edit) {
@@ -380,7 +566,7 @@ async function fixCurrentFileGoogleStyle(): Promise<void> {
 		vscode.window.showInformationMessage('No naming violations detected.');
 	}
 
-	// 2) ТЕПЕРЬ: clang-tidy с -fix, но с отключённым naming-чеком
+	// 2) clang-tidy с -fix, но с отключённым naming-чеком
 	{
 		const args: string[] = [
 			'-fix',
@@ -399,7 +585,7 @@ async function fixCurrentFileGoogleStyle(): Promise<void> {
 		await runTool(clangTidyPath, args, cwd);
 	}
 
-	// 3) И финальный clang-format
+	// 3) финальный clang-format
 	{
 		await runTool(clangFormatPath, ['-i', file], cwd);
 		const finalDoc = await vscode.workspace.openTextDocument(doc.uri);
