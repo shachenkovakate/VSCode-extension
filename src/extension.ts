@@ -463,8 +463,20 @@ async function runTidyNoFixOnFile(
 	if (buildDir.trim().length > 0) {
 		args.push(`-p=${path.join(cwd, buildDir)}`);
 	}
-	// тут НЕТ -config, чтобы naming-чек сработал как в твоём .clang-tidy
-	args.push(file, '--format-style=file', '--header-filter=.*', '--', '-std=c++20');
+
+	const ext = path.extname(file).toLowerCase();
+	const isHeader = ['.h', '.hh', '.hpp', '.hxx', '.ixx'].includes(ext);
+
+	// Базовые аргументы clang-tidy
+	args.push(file, '--format-style=file', '--header-filter=.*', '--');
+
+	// Аргументы компилятора: для заголовков принудительно говорим "это C++-header"
+	if (isHeader) {
+		args.push('-x', 'c++-header', '-std=c++20');
+	} else {
+		args.push('-std=c++20');
+	}
+
 	const res = await runTool(clangTidyPath, args, cwd);
 	return (res.stdout || '') + '\n' + (res.stderr || '');
 }
@@ -575,13 +587,23 @@ async function fixCurrentFileGoogleStyle(): Promise<void> {
 		if (buildDir.trim().length > 0) {
 			args.push(`-p=${path.join(cwd, buildDir)}`);
 		}
+
+		const ext = path.extname(file).toLowerCase();
+		const isHeader = ['.h', '.hh', '.hpp', '.hxx', '.ixx'].includes(ext);
+
 		args.push(
 			`-config=${NAMING_CONFIG_OVERRIDE}`,
 			'-quiet',
 			file,
 			'--',
-			'-std=c++20',
 		);
+
+		if (isHeader) {
+			args.push('-x', 'c++-header', '-std=c++20');
+		} else {
+			args.push('-std=c++20');
+		}
+
 		await runTool(clangTidyPath, args, cwd);
 	}
 
